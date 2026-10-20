@@ -38,7 +38,8 @@ enum AutoOpenCoordinator {
         resolve: @Sendable (String) -> String
     ) async -> [AutoOpenLink] {
         guard AutoOpen.group(in: rootGroup) != nil else { return [] }
-        let paths = await resolvedPaths(of: [source] + references.filter { $0.id != source.id })
+        let localPaths = await resolvedPaths(of: [source] + references.filter { $0.id != source.id })
+        let paths = localPaths.merging(AutoOpen.cloudPaths(source: source, references: references)) { local, _ in local }
         let targets = AutoOpen.targets(
             in: rootGroup,
             databaseDirectory: paths[source.id].map { ($0 as NSString).deletingLastPathComponent },

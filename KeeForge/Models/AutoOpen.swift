@@ -89,6 +89,21 @@ enum AutoOpen {
         }
     }
 
+    /// Remote paths of cloud databases on the source's own account, so a
+    /// relative target resolves against the source's remote folder. Paths on
+    /// different accounts share no namespace and are left out.
+    static func cloudPaths(source: DatabaseReference, references: [DatabaseReference]) -> [UUID: String] {
+        guard let sourceMetadata = source.cloudSyncMetadata else { return [:] }
+        var paths: [UUID: String] = [:]
+        for reference in references + [source] {
+            guard let metadata = reference.cloudSyncMetadata,
+                  metadata.provider == sourceMetadata.provider,
+                  metadata.accountId == sourceMetadata.accountId else { continue }
+            paths[reference.id] = (metadata.displayPath as NSString).standardizingPath
+        }
+        return paths
+    }
+
     static func lastPathComponent(_ path: String) -> String {
         path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
     }
