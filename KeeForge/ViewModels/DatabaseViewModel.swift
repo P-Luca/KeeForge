@@ -462,6 +462,14 @@ final class DatabaseViewModel {
 
     private(set) var state: State = .locked
     private(set) var lockCycleID = 0
+    /// Databases this session's KeePassXC `AutoOpen` group links to.
+    private(set) var autoOpenLinks: [AutoOpenLink] = []
+    /// Raised for the app to replace this session with a linked database.
+    private(set) var autoOpenSwitchRequest: AutoOpenSwitchRequest?
+    /// Set while a session opened from a link unlocks with that link's
+    /// credentials, so biometric auto-unlock does not prompt over it.
+    private(set) var isUnlockingFromAutoOpen = false
+    @ObservationIgnored private var autoOpenTask: Task<Void, Never>?
     var didManuallyLock = false
     private(set) var rootGroup: KPGroup? {
         didSet { rebuildDerivedState() }
@@ -962,6 +970,7 @@ final class DatabaseViewModel {
         guard hasSavedFile else { return false }
         guard canUseBiometrics else { return false }
         guard didManuallyLock == false else { return false }
+        guard isUnlockingFromAutoOpen == false else { return false }
         guard case .locked = state else { return false }
         return true
     }
@@ -2128,6 +2137,10 @@ final class DatabaseViewModel {
             ClipboardService.clearOwnedContents()
         }
         beginNewLockCycle()
+        autoOpenTask?.cancel()
+        autoOpenTask = nil
+        autoOpenLinks = []
+        autoOpenSwitchRequest = nil
         isReplacingWithSyncedCopy = false
         canRemoveMissingDocumentsFile = false
         state = .locked
@@ -4100,7 +4113,66 @@ final class DatabaseViewModel {
         refreshDatabaseReference()
         populateCredentialStoreIfNeeded(root: payload.rootGroup)
         refreshPendingUploadConflict()
+        startAutoOpen(root: payload.rootGroup, sessionKey: sessionKey)
         ReviewPromptService.requestReviewIfAppropriate()
+    }
+
+    // MARK: - Auto Open
+
+    struct AutoOpenSwitchRequest: Identifiable {
+        let id = UUID()
+        let reference: DatabaseReference
+        let credentials: AutoOpenCredentials
+    }
+
+    private func startAutoOpen(root: KPGroup, sessionKey: SymmetricKey) {
+        autoOpenTask?.cancel()
+        guard AutoOpen.group(in: root) != nil else { return }
+        let cycle = lockCycleID
+        let source = databaseReference
+        let resolver = FieldReferenceResolver(entries: root.allEntries, sessionKey: sessionKey)
+        autoOpenTask = Task { [weak self] in
+            let links = await AutoOpenCoordinator.links(
+                in: root,
+                source: source,
+                references: DatabaseListStore.databases,
+                deviceName: AutoOpenCoordinator.deviceName,
+                resolve: { resolver.resolve($0) }
+            )
+            guard let self, self.lockCycleID == cycle, Task.isCancelled == false else { return }
+            self.autoOpenLinks = links
+            for link in links {
+                guard self.lockCycleID == cycle, Task.isCancelled == false,
+                      let credentials = await self.autoOpenCredentials(for: link) else { return }
+                await AutoOpenCoordinator.primeForAutoFill(link, credentials: credentials)
+            }
+        }
+    }
+
+    func autoOpenCredentials(for link: AutoOpenLink) async -> AutoOpenCredentials? {
+        let cycle = lockCycleID
+        guard case .unlocked = state, let sessionKey, let entry = entry(withID: link.target.id) else { return nil }
+        let password = (try? entry.password.decrypt(using: sessionKey)).map(resolvingFieldReferences) ?? ""
+        let keyFileData = await AutoOpenCoordinator.keyFileData(for: link.reference)
+        guard lockCycleID == cycle else { return nil }
+        return AutoOpenCredentials(password: password, keyFileData: keyFileData)
+    }
+
+    /// The app answers by locking this session and opening the linked one.
+    func requestAutoOpenSwitch(to link: AutoOpenLink) async {
+        guard let credentials = await autoOpenCredentials(for: link) else { return }
+        let reference = DatabaseListStore.databases.first { $0.id == link.reference.id } ?? link.reference
+        autoOpenSwitchRequest = AutoOpenSwitchRequest(reference: reference, credentials: credentials)
+    }
+
+    /// Raises `isUnlockingFromAutoOpen` before returning, so the unlock
+    /// screen that appears next never starts a biometric prompt of its own.
+    func unlockFromAutoOpen(_ credentials: AutoOpenCredentials) {
+        isUnlockingFromAutoOpen = true
+        Task {
+            await unlock(password: credentials.password, keyFileData: credentials.keyFileData)
+            isUnlockingFromAutoOpen = false
+        }
     }
 
     private func hardwareKeyCompositeKey(
@@ -4334,7 +4406,7 @@ final class DatabaseViewModel {
         return (result.url, result.data, nil)
     }
 
-    nonisolated private static func readLocalDatabase(
+    nonisolated static func readLocalDatabase(
         reference: DatabaseReference
     ) async throws -> LocalDatabaseReadResult {
         try await CoordinatedFileReader.performBlocking(timeout: localDatabaseReadTimeout) {

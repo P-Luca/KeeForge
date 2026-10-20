@@ -3,7 +3,7 @@ import Foundation
 /// One database a KeePassXC-style `AutoOpen` entry asks to open alongside the
 /// database that holds it.
 ///
-/// KeePassXC convention: entries in the root's direct child group named
+/// KeePassXC convention: entries in the root group's direct child named
 /// `AutoOpen`. URL is the database path (`kdbx://` and `file://` prefixes
 /// allowed, relative paths resolve against the holding database's folder,
 /// `{DB_DIR}` expands to that folder), Password is its master password, and
@@ -19,16 +19,28 @@ struct AutoOpenTarget: Identifiable, Sendable, Equatable {
     let keyFilePath: String?
     let hasPassword: Bool
 
-    var databaseFilename: String { (databasePath as NSString).lastPathComponent }
-    var keyFileFilename: String? { keyFilePath.map { ($0 as NSString).lastPathComponent } }
+    var databaseFilename: String { AutoOpen.lastPathComponent(databasePath) }
+    var keyFileFilename: String? { keyFilePath.map(AutoOpen.lastPathComponent) }
+}
+
+/// An `AutoOpenTarget` matched to a database in KeeForge's list. KeeForge
+/// cannot open an arbitrary path (sandbox, security-scoped bookmarks), so a
+/// target is only usable once the user has added its file.
+struct AutoOpenLink: Identifiable, Sendable, Equatable {
+    let target: AutoOpenTarget
+    let reference: DatabaseReference
+
+    var id: UUID { target.id }
 }
 
 enum AutoOpen {
     static let groupName = "AutoOpen"
     static let deviceFieldName = "IfDevice"
 
+    /// `rootGroup` is the parser's synthetic `<Root>`; KeePassXC's root group
+    /// is the KDBX top-level group beneath it.
     static func group(in rootGroup: KPGroup) -> KPGroup? {
-        rootGroup.groups.first { $0.name == groupName }
+        rootGroup.groups.flatMap(\.groups).first { $0.name == groupName }
     }
 
     /// `resolve` expands field references in UserName and URL; it must be the
@@ -56,6 +68,29 @@ enum AutoOpen {
                 hasPassword: entry.hasPassword
             )
         }
+    }
+
+    /// Matches by resolved path first. A path written on another computer
+    /// rarely equals the local one, so a unique filename match is accepted too.
+    static func links(
+        for targets: [AutoOpenTarget],
+        sourceID: UUID,
+        references: [DatabaseReference],
+        referencePaths: [UUID: String]
+    ) -> [AutoOpenLink] {
+        let candidates = references.filter { $0.id != sourceID }
+        var linkedReferenceIDs = Set<UUID>()
+        return targets.compactMap { target in
+            let byPath = candidates.first { referencePaths[$0.id].map { ($0 as NSString).standardizingPath } == target.databasePath }
+            let byName = candidates.filter { $0.filename.caseInsensitiveCompare(target.databaseFilename) == .orderedSame }
+            guard let reference = byPath ?? (byName.count == 1 ? byName.first : nil),
+                  linkedReferenceIDs.insert(reference.id).inserted else { return nil }
+            return AutoOpenLink(target: target, reference: reference)
+        }
+    }
+
+    static func lastPathComponent(_ path: String) -> String {
+        path.split(whereSeparator: { $0 == "/" || $0 == "\\" }).last.map(String.init) ?? path
     }
 
     static func appliesToDevice(_ rule: String?, deviceName: String) -> Bool {

@@ -38,6 +38,9 @@ final class AppRoutingCoordinator {
 
     enum DatabaseDestination {
         case open(DatabaseReference)
+        /// A database linked from the source's `AutoOpen` group, unlocked
+        /// with the credentials that entry holds.
+        case openFromAutoOpen(DatabaseReference, AutoOpenCredentials)
         case close
     }
 

@@ -401,6 +401,13 @@ private struct AppRootView: View {
         .onChange(of: databaseTransitionState) { _, _ in
             finishDatabaseTransitionIfReady()
         }
+        .onChange(of: activeDatabaseViewModel?.autoOpenSwitchRequest?.id) { _, _ in
+            guard let request = activeDatabaseViewModel?.autoOpenSwitchRequest else { return }
+            routing.requestDatabaseTransition(
+                to: .openFromAutoOpen(request.reference, request.credentials),
+                from: activeDatabaseViewModel
+            )
+        }
         .task(id: routing.deferredPresentation?.id) {
             guard let requestID = routing.deferredPresentation?.id else { return }
             // SwiftUI drops presentations raised during another sheet's dismissal.
@@ -578,6 +585,10 @@ private struct AppRootView: View {
         switch destination {
         case .open(let reference):
             activeDatabaseViewModel = DatabaseViewModel(databaseReference: reference)
+        case .openFromAutoOpen(let reference, let credentials):
+            let session = DatabaseViewModel(databaseReference: reference)
+            activeDatabaseViewModel = session
+            session.unlockFromAutoOpen(credentials)
         case .close:
             returnToDatabaseList()
         }

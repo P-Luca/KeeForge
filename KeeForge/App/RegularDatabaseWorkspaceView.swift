@@ -631,6 +631,8 @@ struct RegularDatabaseWorkspaceView: View {
         }
 
         ToolbarItemGroup(placement: .navigation) {
+            LinkedDatabasesMenu(viewModel: viewModel)
+
             if CloudSyncControls.isVisible(for: viewModel) {
                 CloudSyncControls(viewModel: viewModel)
             }
