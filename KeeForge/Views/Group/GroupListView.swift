@@ -157,6 +157,8 @@ struct GroupListView: View {
                                 .accessibilityLabel("Lock")
                                 .accessibilityIdentifier("lock.button")
 
+                                LinkedDatabasesMenu(viewModel: viewModel)
+
                                 if let warningText = viewModel.cloudSyncBannerText {
                                     CloudSyncWarningButton(message: warningText)
                                 }

@@ -181,6 +181,16 @@ struct KeeForgeCommands: Commands {
             }
             .keyboardShortcut("l", modifiers: .command)
             .disabled(isUnlocked == false)
+
+            Menu("Open Linked Database") {
+                ForEach(viewModel?.autoOpenLinks ?? []) { link in
+                    Button(link.reference.displayName) {
+                        guard let viewModel else { return }
+                        Task { await viewModel.requestAutoOpenSwitch(to: link) }
+                    }
+                }
+            }
+            .disabled(isUnlocked == false || viewModel?.autoOpenLinks.isEmpty != false)
         }
 
         // Without a replacement macOS ships a "KeeForge Help" item that only raises

@@ -4,6 +4,7 @@
 
 ### New Features
 
+- KeePassXC-compatible Auto Open: when a database has an `AutoOpen` group, KeeForge links each of its entries (URL = database path, password = master password, username = key file, `IfDevice` honored) to a database in your list. A linked database on the same WebDAV or FTP account, or beside the main database in KeeForge's own folder, is added to the list automatically. Switch to a linked database without typing its password from the link button in the toolbar, or from Database > Open Linked Database on Mac. Unlocking the main database also prepares every linked database for AutoFill.
 - Restore entries and groups from the Recycle Bin on iPhone, iPad, and Mac, returning them to their original group when known or choosing another destination (#223).
 
 ### Changes
