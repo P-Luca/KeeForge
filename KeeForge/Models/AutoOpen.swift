@@ -24,8 +24,9 @@ struct AutoOpenTarget: Identifiable, Sendable, Equatable {
 }
 
 /// An `AutoOpenTarget` matched to a database in KeeForge's list. KeeForge
-/// cannot open an arbitrary path (sandbox, security-scoped bookmarks), so a
-/// target is only usable once the user has added its file.
+/// cannot open an arbitrary local path (sandbox, security-scoped bookmarks),
+/// so a local target is only usable once the user has added its file; WebDAV
+/// and FTP targets beside a cloud source are added automatically.
 struct AutoOpenLink: Identifiable, Sendable, Equatable {
     let target: AutoOpenTarget
     let reference: DatabaseReference
@@ -102,6 +103,26 @@ enum AutoOpen {
             paths[reference.id] = (metadata.displayPath as NSString).standardizingPath
         }
         return paths
+    }
+
+    /// WebDAV and FTP identify a file by its server path, so a target that no
+    /// listed database matches can be registered on the source's account
+    /// without a file picker. A path written on another computer rarely exists
+    /// on the server, so the same filename beside the source is tried next.
+    static func cloudCandidates(for target: AutoOpenTarget, source: DatabaseReference) -> [CloudFile] {
+        guard let metadata = source.cloudSyncMetadata,
+              let provider = CloudProviderKind(rawValue: metadata.provider),
+              provider == .webDAV || provider == .ftp else { return [] }
+        let sourcePath = (metadata.displayPath as NSString).standardizingPath
+        let sibling = ((sourcePath as NSString).deletingLastPathComponent as NSString)
+            .appendingPathComponent(target.databaseFilename)
+        var paths = target.databasePath.hasPrefix("/") ? [target.databasePath] : []
+        if paths.contains(sibling) == false {
+            paths.append(sibling)
+        }
+        return paths.filter { $0 != sourcePath }.map {
+            CloudFile(id: $0, name: lastPathComponent($0), path: $0, isFolder: false, modifiedDate: nil, size: nil)
+        }
     }
 
     static func lastPathComponent(_ path: String) -> String {

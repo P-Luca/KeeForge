@@ -4141,11 +4141,26 @@ final class DatabaseViewModel {
             )
             guard let self, self.lockCycleID == cycle, Task.isCancelled == false else { return }
             self.autoOpenLinks = links
-            for link in links {
-                guard self.lockCycleID == cycle, Task.isCancelled == false,
-                      let credentials = await self.autoOpenCredentials(for: link) else { return }
-                await AutoOpenCoordinator.primeForAutoFill(link, credentials: credentials)
-            }
+            await self.primeAutoOpenLinks(links, cycle: cycle)
+
+            let added = await AutoOpenCoordinator.addMissingDatabases(
+                in: root,
+                source: source,
+                linked: links,
+                deviceName: AutoOpenCoordinator.deviceName,
+                resolve: { resolver.resolve($0) }
+            )
+            guard self.lockCycleID == cycle, Task.isCancelled == false, added.isEmpty == false else { return }
+            self.autoOpenLinks += added
+            await self.primeAutoOpenLinks(added, cycle: cycle)
+        }
+    }
+
+    private func primeAutoOpenLinks(_ links: [AutoOpenLink], cycle: Int) async {
+        for link in links {
+            guard lockCycleID == cycle, Task.isCancelled == false,
+                  let credentials = await autoOpenCredentials(for: link) else { return }
+            await AutoOpenCoordinator.primeForAutoFill(link, credentials: credentials)
         }
     }
 

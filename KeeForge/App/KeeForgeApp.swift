@@ -401,6 +401,9 @@ private struct AppRootView: View {
         .onChange(of: databaseTransitionState) { _, _ in
             finishDatabaseTransitionIfReady()
         }
+        .onChange(of: activeDatabaseViewModel?.autoOpenLinks.map(\.reference.id)) { _, _ in
+            listViewModel.reload()
+        }
         .onChange(of: activeDatabaseViewModel?.autoOpenSwitchRequest?.id) { _, _ in
             guard let request = activeDatabaseViewModel?.autoOpenSwitchRequest else { return }
             routing.requestDatabaseTransition(

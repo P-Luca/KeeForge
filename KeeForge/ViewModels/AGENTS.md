@@ -12,7 +12,7 @@ Name the owner before changing a workflow. Views render, collect input, and forw
 - `AppSettingsViewModel`: preference persistence and its live effects on open sessions.
 - `AppRoutingCoordinator`: launch order, queued database routes, incoming-URL classification, pending TOTP enrollment, Open/Close Database transitions.
 - `EntrySecretAction`: every reveal/copy disclosure that follows device-owner authentication.
-- `AutoOpenCoordinator`: KeePassXC `AutoOpen` links. A session finds its links after unlock (`DatabaseViewModel.autoOpenLinks`) and primes each linked database for AutoFill exactly as that database's own unlock would (Keychain item, local shared copy, identities); a switch is a `DatabaseDestination.openFromAutoOpen` transition whose new session unlocks with the entry's credentials.
+- `AutoOpenCoordinator`: KeePassXC `AutoOpen` links. A session finds its links after unlock (`DatabaseViewModel.autoOpenLinks`), adds missing ones it can reach without a picker (WebDAV/FTP on the source account, top-level Documents siblings), and primes each linked database for AutoFill exactly as that database's own unlock would (Keychain item, local shared copy, identities); a switch is a `DatabaseDestination.openFromAutoOpen` transition whose new session unlocks with the entry's credentials.
 - `DatabaseListViewModel`: the database list and all pending-upload draining (`drainPendingUploadsOnAppActive()`); a session never drains.
 
 ## Invariants

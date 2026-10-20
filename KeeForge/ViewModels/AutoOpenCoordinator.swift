@@ -49,6 +49,71 @@ enum AutoOpenCoordinator {
         return AutoOpen.links(for: targets, sourceID: source.id, references: references, referencePaths: paths)
     }
 
+    /// Adds the databases the source links to but the list lacks, where
+    /// KeeForge can reach them without a file picker: WebDAV and FTP files on
+    /// the source's account, and top-level files in the app's Documents folder
+    /// beside a source stored there. Cloud copies are downloaded so the new
+    /// links can be primed like any other.
+    static func addMissingDatabases(
+        in rootGroup: KPGroup,
+        source: DatabaseReference,
+        linked: [AutoOpenLink],
+        deviceName: String,
+        resolve: @Sendable (String) -> String
+    ) async -> [AutoOpenLink] {
+        var sourcePath = source.cloudSyncMetadata.map { ($0.displayPath as NSString).standardizingPath }
+        if source.isCloudBacked == false {
+            sourcePath = await resolvedPaths(of: [source])[source.id]
+        }
+        guard let sourcePath else { return [] }
+        let targets = AutoOpen.targets(
+            in: rootGroup,
+            databaseDirectory: (sourcePath as NSString).deletingLastPathComponent,
+            deviceName: deviceName,
+            resolve: resolve
+        )
+        var knownIDs = Set(linked.map(\.reference.id) + [source.id])
+        var added: [AutoOpenLink] = []
+        for target in targets where linked.contains(where: { $0.target.id == target.id }) == false {
+            guard Task.isCancelled == false else { break }
+            let reference: DatabaseReference?
+            if source.isCloudBacked {
+                reference = await addCloudDatabase(for: target, source: source)
+            } else {
+                reference = addDocumentsDatabase(for: target, sourcePath: sourcePath)
+            }
+            guard let reference, knownIDs.insert(reference.id).inserted else { continue }
+            added.append(AutoOpenLink(target: target, reference: reference))
+        }
+        return added
+    }
+
+    private static func addCloudDatabase(for target: AutoOpenTarget, source: DatabaseReference) async -> DatabaseReference? {
+        guard let metadata = source.cloudSyncMetadata,
+              let provider = CloudProviderRegistry.provider(for: metadata.provider),
+              provider.isAuthenticated(accountId: metadata.accountId) else { return nil }
+        for file in AutoOpen.cloudCandidates(for: target, source: source) {
+            guard (try? await provider.getMetadata(accountId: metadata.accountId, fileId: file.id)) != nil else { continue }
+            let reference = DatabaseListStore.addCloud(provider: metadata.provider, accountId: metadata.accountId, file: file)
+            guard let resolution = try? await CloudSyncCoordinator.syncIfNeededForOpen(
+                reference: reference,
+                allowCachedFallback: false
+            ) else { return reference }
+            DatabaseListStore.update(resolution.reference)
+            return resolution.reference
+        }
+        return nil
+    }
+
+    private static func addDocumentsDatabase(for target: AutoOpenTarget, sourcePath: String) -> DatabaseReference? {
+        let sourceURL = URL(fileURLWithPath: sourcePath)
+        let url = sourceURL.deletingLastPathComponent().appendingPathComponent(target.databaseFilename, isDirectory: false)
+        guard DatabaseListStore.isTopLevelDocumentsFile(sourceURL),
+              url.standardizedFileURL != sourceURL.standardizedFileURL,
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try? DatabaseListStore.add(url: url)
+    }
+
     /// Bookmark resolution touches the file system, so it stays off the main actor.
     private static func resolvedPaths(of references: [DatabaseReference]) async -> [UUID: String] {
         let localReferences = references.filter { $0.isCloudBacked == false && $0.bookmarkData != nil }
